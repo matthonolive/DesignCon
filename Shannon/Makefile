@@ -33,7 +33,7 @@ KERNELS  = tasks/eq_fixed.h tasks/mlse_fixed.h
 QEMU = qemu-system-riscv64 -machine virt -cpu rv64 -bios none -nographic \
        -icount shift=0,sleep=off -kernel $(ELF)
 
-.PHONY: all firmware run measure workload cosim clean FORCE
+.PHONY: all firmware run measure workload cosim sweep oracle plot check validate clean FORCE
 all: firmware
 
 # ── host: generate the boundary artifact ──────────────────────────────────
@@ -76,4 +76,39 @@ measure:
 	$(QEMU) | head -4
 
 clean:
-	rm -f $(ELF) link.ld bridge/bridge bridge/cosim
+	rm -f $(ELF) link.ld bridge/bridge bridge/cosim validation/validate validation/oracle ber_sweep.csv ber_sweep.png
+
+# ── validation harness (host) ──────────────────────────────────────────────
+validation/validate: validation/validate.c simulation/serdes_synth.c simulation/serdes_synth.h \
+                 tasks/mlse_fixed.h
+	$(HOSTCC) -O2 -Isimulation -Itasks -o $@ validation/validate.c simulation/serdes_synth.c -lm
+
+validation/oracle: validation/oracle.c simulation/serdes_synth.c simulation/serdes_synth.h
+	$(HOSTCC) -O2 -Isimulation -o $@ validation/oracle.c simulation/serdes_synth.c -lm
+
+sweep: validation/validate
+	./validation/validate
+	./validation/validate csv > ber_sweep.csv
+	@echo "wrote ber_sweep.csv"
+
+oracle: validation/oracle
+	./validation/oracle
+
+plot: ber_sweep.csv
+	python3 validation/plot_ber.py ber_sweep.csv ber_sweep.png && echo "wrote ber_sweep.png"
+
+# architecture + determinism hygiene
+check: firmware
+	@echo "[check] firmware must not include host headers (bridge/simulation)..."
+	@! grep -rEn 'include .*(serdes_synth|bridge|validation|s4p_channel)' scheduler tasks \
+	   || (echo "  BOUNDARY VIOLATION" && false)
+	@echo "  ok: scheduler/ and tasks/ are host-free"
+	@echo "[check] deterministic output across two QEMU runs..."
+	@$(QEMU) 2>/dev/null > .run1.txt; $(QEMU) 2>/dev/null > .run2.txt; \
+	  if diff -q .run1.txt .run2.txt >/dev/null; then echo "  ok: identical"; \
+	  else echo "  NONDETERMINISTIC"; diff .run1.txt .run2.txt; false; fi; \
+	  rm -f .run1.txt .run2.txt
+
+# everything
+validate: cosim oracle sweep check
+	@echo "=== all validation passed ==="
