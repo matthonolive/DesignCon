@@ -22,7 +22,7 @@
 #include "mlse_fixed.h"
 
 /* ── tunables ─────────────────────────────────────────────────────────── */
-#define FRAME_HZ     1000u
+#define FRAME_HZ     200u
 #define RUN_SECONDS  5u
 #ifndef EQ_BLOCK
 #define EQ_BLOCK     256u
@@ -31,7 +31,7 @@
 #define FFE_BUDGET   53000u
 #endif
 #ifndef MLSE_BUDGET
-#define MLSE_BUDGET  230000u
+#define MLSE_BUDGET  600000u
 #endif
 #define HB_BUDGET    20000u
 
@@ -47,6 +47,7 @@ static mlse_t     mlse;
 static int64_t    mlse_pm[MLSE_NS];
 static int8_t     mlse_tbs[MLSE_TB * MLSE_NS];
 static int8_t     mlse_tbp[MLSE_TB * MLSE_NS];
+static int32_t    mlse_exp[MLSE_NS * MLSE_M];
 static uint32_t   dec_idx;                   /* decisions emitted this pass   */
 
 static uint32_t   pass_errors, pass_decisions;
@@ -66,8 +67,9 @@ static void task_rx_ffe(void){
 /* ── MLSE task ────────────────────────────────────────────────────────── */
 static void task_mlse(void){
     if(eq_pos - EQ_BLOCK == 0){              /* first block of the pass       */
-        mlse_init(&mlse, mlse_pm, mlse_tbs, mlse_tbp,
-                  mlse_target, mlse_levels, MLSE_NS, MLSE_M, MLSE_L, MLSE_TB);
+        mlse_init(&mlse, mlse_pm, mlse_tbs, mlse_tbp, mlse_exp,
+                  mlse_target, mlse_levels,
+                  MLSE_NS, MLSE_M, MLSE_L, MLSE_TB, MLSE_LVL_Q);
         dec_idx = 0; pass_errors = 0; pass_decisions = 0;
     }
     int32_t acc = 0;
